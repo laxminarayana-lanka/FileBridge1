@@ -8,6 +8,7 @@ import SimulationModal from './components/SimulationModal';
 import NearbyShareIllustration from './components/NearbyShareIllustration';
 import { FileBridgeEngine } from './services/transferEngine';
 import { historyService } from './services/historyService';
+import { backgroundAlertService } from './services/backgroundService';
 import { generateBridgeId, formatBytes } from './utils';
 import {
   ArrowUp,
@@ -20,7 +21,9 @@ import {
   WifiOff,
   Tv,
   CheckCircle2,
-  HardDrive
+  HardDrive,
+  Bell,
+  X
 } from 'lucide-react';
 
 export default function App() {
@@ -39,6 +42,7 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isSimulationOpen, setIsSimulationOpen] = useState(false);
   const [history, setHistory] = useState([]);
+  const [completionToast, setCompletionToast] = useState(null);
 
   // Connection & Transfer States
   const [isConnecting, setIsConnecting] = useState(false);
@@ -72,6 +76,12 @@ export default function App() {
       setInitialSendToId(targetCode.toUpperCase());
       setActiveTab('send');
     }
+
+    // Request notification permission early so user gets alert on completion
+    const timer = setTimeout(() => {
+      backgroundAlertService.requestNotificationPermission();
+    }, 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   // Initialize Engine & History
@@ -119,6 +129,7 @@ export default function App() {
     });
 
     engine.on('transfer_started', (transfer) => {
+      backgroundAlertService.startBackgroundKeepAlive();
       setTransferState((prev) => ({
         ...prev,
         isActive: true,
@@ -136,6 +147,7 @@ export default function App() {
     });
 
     engine.on('transfer_progress', (p) => {
+      backgroundAlertService.updateTabProgress(p.progress, transferState.fileName);
       setTransferState((prev) => ({
         ...prev,
         progress: p.progress,
@@ -148,6 +160,20 @@ export default function App() {
     });
 
     engine.on('transfer_completed', (res) => {
+      backgroundAlertService.stopBackgroundKeepAlive();
+      backgroundAlertService.sendCompletionAlert({
+        role: engine.role,
+        fileName: res.fileName,
+        fileSize: res.fileSize
+      });
+
+      setCompletionToast({
+        role: engine.role,
+        fileName: res.fileName,
+        fileSize: res.fileSize,
+        duration: res.duration || 0
+      });
+
       setTransferState((prev) => ({
         ...prev,
         progress: 100,
@@ -172,6 +198,15 @@ export default function App() {
       }
     });
 
+    engine.on('transfer_completed_ack', (ack) => {
+      // Sender receives confirmation that receiver finished
+      backgroundAlertService.sendCompletionAlert({
+        role: 'sender',
+        fileName: ack.fileName,
+        fileSize: ack.fileSize
+      });
+    });
+
     engine.on('transfer_paused', () => {
       setTransferState((prev) => ({ ...prev, isPaused: true }));
     });
@@ -181,6 +216,7 @@ export default function App() {
     });
 
     engine.on('transfer_cancelled', () => {
+      backgroundAlertService.stopBackgroundKeepAlive();
       setTransferState((prev) => ({ ...prev, isActive: false }));
     });
 
@@ -252,6 +288,7 @@ export default function App() {
   };
 
   const handleCancel = () => {
+    backgroundAlertService.stopBackgroundKeepAlive();
     if (simulationTimerRef.current) {
       clearInterval(simulationTimerRef.current);
       simulationTimerRef.current = null;
@@ -261,6 +298,8 @@ export default function App() {
   };
 
   const handleReset = () => {
+    backgroundAlertService.stopBackgroundKeepAlive();
+    setCompletionToast(null);
     setTransferState({
       isActive: false,
       fileName: '',
@@ -330,6 +369,18 @@ export default function App() {
         simulationTimerRef.current = null;
 
         const duration = (Date.now() - startTime) / 1000;
+        backgroundAlertService.sendCompletionAlert({
+          role: 'sender',
+          fileName,
+          fileSize: totalBytes
+        });
+        setCompletionToast({
+          role: 'sender',
+          fileName,
+          fileSize: totalBytes,
+          duration
+        });
+
         setTransferState((prev) => ({
           ...prev,
           progress: 100,
@@ -387,6 +438,33 @@ export default function App() {
         onOpenSimulation={() => setIsSimulationOpen(true)}
         onToggleMenu={() => setIsHistoryOpen(true)}
       />
+
+      {/* Floating Completion Alert Banner (for both Sender and Receiver) */}
+      {completionToast && (
+        <div className="fixed top-20 inset-x-4 z-50 max-w-md mx-auto animate-bounce-gentle">
+          <div className="p-4 rounded-2xl bg-white border-2 border-emerald-500 shadow-xl flex items-center justify-between space-x-3">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                <Bell className="h-5 w-5 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#1f2937] truncate">
+                  {completionToast.role === 'sender' ? '✅ File Sent Successfully!' : '📥 File Received & Saved!'}
+                </p>
+                <p className="text-[11px] text-[#64748b] truncate mt-0.5">
+                  {completionToast.fileName} ({formatBytes(completionToast.fileSize)})
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setCompletionToast(null)}
+              className="p-1.5 rounded-full hover:bg-[#f1f5f9] text-[#64748b] hover:text-[#1f2937]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-lg w-full mx-auto px-4 py-6 sm:py-8 flex flex-col justify-start">

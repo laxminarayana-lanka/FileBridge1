@@ -12,7 +12,9 @@ import {
   Radio,
   FileText,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  Bell,
+  Zap
 } from 'lucide-react';
 import { formatBytes, formatSpeed, formatTimeRemaining } from '../utils';
 
@@ -100,6 +102,31 @@ export default function TransferProgress({
           </button>
         )}
       </div>
+
+      {/* Background & Alert Status Banner */}
+      {!isCompleted ? (
+        <div className="mb-5 flex items-center justify-between px-3.5 py-1.5 rounded-full bg-[#e9eef6] border border-[#e2e8f0] text-[11px] text-[#475569]">
+          <div className="flex items-center space-x-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="font-semibold text-[#1e293b]">Runs in Background • Screen Kept Awake</span>
+          </div>
+          <div className="hidden sm:flex items-center space-x-1 text-[10px] text-[#64748b]">
+            <Bell className="h-3 w-3 text-[#004d61]" />
+            <span>Alert will fire on completion</span>
+          </div>
+        </div>
+      ) : (
+        <div className="mb-5 flex items-center justify-between px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800">
+          <div className="flex items-center space-x-1.5">
+            <Bell className="h-3.5 w-3.5 text-emerald-600 animate-bounce" />
+            <span className="font-bold">Completion Alert Sent to Both Devices!</span>
+          </div>
+          <span className="text-[10px] text-emerald-700 font-semibold">Chime, Notification & Vibration fired</span>
+        </div>
+      )}
 
       {/* Speedometer & Stats Grid */}
       <div className="grid grid-cols-3 gap-2.5 sm:gap-3 p-4 rounded-2xl bg-[#f8fafd] border border-[#e2e8f0] mb-6">

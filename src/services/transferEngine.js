@@ -383,6 +383,10 @@ export class FileBridgeEngine {
       this.emit('resumed_by_peer');
     } else if (data.type === 'CANCEL') {
       this.handleCancel();
+    } else if (data.type === 'TRANSFER_ACK') {
+      if (this.role === 'sender') {
+        this.emit('transfer_completed_ack', data);
+      }
     }
   }
 
@@ -519,6 +523,13 @@ export class FileBridgeEngine {
       this.stopSpeedTracker();
       const blob = new Blob(this.activeTransfer.chunks, { type: this.activeTransfer.fileType });
       const downloadUrl = URL.createObjectURL(blob);
+
+      // Send confirmation to sender so both devices alert simultaneously
+      this.sendPayload({
+        type: 'TRANSFER_ACK',
+        fileName: this.activeTransfer.fileName,
+        fileSize: this.activeTransfer.fileSize
+      });
 
       this.emit('transfer_completed', {
         fileName: this.activeTransfer.fileName,
