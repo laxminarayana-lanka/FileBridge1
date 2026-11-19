@@ -25,7 +25,8 @@ export default function SenderView({
   onResetError,
   initialTargetId = '',
   discoveredPeers = [],
-  onScanNearby
+  onScanNearby,
+  connectingStatus = ''
 }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [targetId, setTargetId] = useState(initialTargetId);
@@ -522,7 +523,7 @@ export default function SenderView({
         {isConnecting ? (
           <>
             <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            <span>Connecting to Receiver ({targetId})...</span>
+            <span>{connectingStatus || `Connecting to Receiver (${targetId})...`}</span>
           </>
         ) : (
           <>

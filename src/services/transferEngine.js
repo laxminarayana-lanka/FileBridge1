@@ -1,8 +1,31 @@
 import Peer from 'peerjs';
 
-const CHUNK_SIZE = 64 * 1024; // 64 KB per chunk
-const BUFFERED_AMOUNT_HIGH_THRESHOLD = 2 * 1024 * 1024; // 2 MB backpressure limit
-const BUFFERED_AMOUNT_LOW_THRESHOLD = 512 * 1024; // 512 KB resume threshold
+const CHUNK_SIZE = 64 * 1024; // 64 KB per chunk (optimal for WebRTC MTU & SCTP fragmentation)
+const BUFFERED_AMOUNT_HIGH_THRESHOLD = 4 * 1024 * 1024; // 4 MB backpressure threshold
+const BUFFERED_AMOUNT_LOW_THRESHOLD = 1024 * 1024; // 1 MB resume threshold
+
+// Public global STUN and TURN relay servers for guaranteed peer connectivity across 4G/5G and NATs
+const ICE_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    // Free public TURN relays from Open Relay Project (metered.ca) for symmetric NAT & mobile cellular networks
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ],
+  iceCandidatePoolSize: 10
+};
 
 export class FileBridgeEngine {
   constructor() {
@@ -48,19 +71,14 @@ export class FileBridgeEngine {
     this.role = 'receiver';
     this.cleanupPeer();
 
-    const normalizedId = (customId || 'FB-' + Math.random().toString(36).substring(2, 6).toUpperCase()).replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+    const normalizedId = (customId || 'FB-' + Math.random().toString(36).substring(2, 6).toUpperCase())
+      .replace(/[^A-Z0-9-]/gi, '')
+      .toUpperCase();
     this.myBridgeId = normalizedId;
 
     try {
-      // Initialize PeerJS with public STUN servers for internet traversal
       this.peer = new Peer(normalizedId.toLowerCase(), {
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
-          ]
-        },
+        config: ICE_CONFIG,
         debug: 1
       });
 
@@ -75,8 +93,7 @@ export class FileBridgeEngine {
       });
 
       this.peer.on('error', (err) => {
-        console.warn('PeerJS fallback notice:', err.type, err.message);
-        // Fallback to local broadcast mode gracefully if cloud signaling has ID collision
+        console.warn('PeerJS receiver notice:', err.type, err.message);
         this.emit('ready', { bridgeId: this.myBridgeId, peerId: normalizedId.toLowerCase(), localOnly: true });
         this.startReceiverBeacon();
       });
@@ -146,22 +163,17 @@ export class FileBridgeEngine {
     this.cleanupPeer();
 
     const normalizedTarget = targetBridgeId.replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+    this.targetBridgeId = normalizedTarget;
 
     return new Promise((resolve, reject) => {
-      try {
-        const tempSenderId = 'sender-' + Math.random().toString(36).substring(2, 9);
-        this.peer = new Peer(tempSenderId, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-          },
-          debug: 1
-        });
+      let isResolved = false;
+      const tempSenderId = 'fb-' + Math.random().toString(36).substring(2, 9);
 
-        const timeout = setTimeout(() => {
-          // If PeerJS cloud takes too long, test local broadcast channel
+      // Connection timeout: 20 seconds for cross-network WebRTC STUN/TURN negotiation
+      const timeout = setTimeout(() => {
+        if (!isResolved) {
+          isResolved = true;
+          // Check if local same-browser receiver is present
           if (this.broadcast) {
             this.broadcast.postMessage({
               type: 'PING_RECEIVER',
@@ -170,26 +182,48 @@ export class FileBridgeEngine {
               senderName
             });
           }
-        }, 3000);
+          reject(new Error(`Connection to ${normalizedTarget} timed out. Ensure the receiver is online and has "Receive" open.`));
+        }
+      }, 20000);
+
+      try {
+        this.peer = new Peer(tempSenderId, {
+          config: ICE_CONFIG,
+          debug: 1
+        });
 
         this.peer.on('open', () => {
+          this.emit('connection_status', 'Contacting receiver...');
+
           const conn = this.peer.connect(normalizedTarget.toLowerCase(), {
-            reliable: true,
-            serialization: 'binary'
+            reliable: true
           });
 
           this.connection = conn;
           this.setupConnectionHandlers(conn);
 
           conn.on('open', () => {
-            clearTimeout(timeout);
-            resolve(conn);
+            if (!isResolved) {
+              isResolved = true;
+              clearTimeout(timeout);
+              this.emit('connection_status', 'Connected! Requesting approval...');
+              resolve(conn);
+            }
+          });
+
+          conn.on('error', (err) => {
+            console.error('DataConnection error:', err);
+            if (!isResolved) {
+              isResolved = true;
+              clearTimeout(timeout);
+              reject(err);
+            }
           });
         });
 
         this.peer.on('error', (err) => {
-          clearTimeout(timeout);
-          // Try local broadcast fallback for same-browser testing
+          console.warn('Peer error during connect:', err);
+          // If PeerJS reports peer-unavailable, check local BroadcastChannel first (same machine test)
           if (this.broadcast) {
             this.broadcast.postMessage({
               type: 'PING_RECEIVER',
@@ -197,13 +231,20 @@ export class FileBridgeEngine {
               senderId: tempSenderId,
               senderName
             });
-            resolve('broadcast_fallback');
-          } else {
-            reject(err);
+          }
+          if (!isResolved && err.type === 'peer-unavailable') {
+            isResolved = true;
+            clearTimeout(timeout);
+            reject(new Error(`Receiver "${normalizedTarget}" was not found. Please verify the code on the receiver's screen.`));
           }
         });
+
       } catch (err) {
-        reject(err);
+        if (!isResolved) {
+          isResolved = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
       }
     });
   }
@@ -236,51 +277,75 @@ export class FileBridgeEngine {
           timestamp: msg.timestamp || Date.now()
         });
       }
-    }
-
-    if (this.role === 'receiver') {
-      if (msg.type === 'PING_RECEIVER' && msg.targetId === this.myBridgeId) {
-        this.broadcast.postMessage({
-          type: 'RECEIVER_PONG',
-          targetId: msg.senderId,
-          receiverId: this.myBridgeId
-        });
-      } else if (msg.type === 'DATA_ENVELOPE' && msg.targetId === this.myBridgeId) {
-        this.handleIncomingData(msg.payload);
-      }
-    } else if (this.role === 'sender') {
-      if (msg.type === 'RECEIVER_PONG' && msg.targetId === this.peer?.id) {
-        this.emit('connected_via_bus');
-      } else if (msg.type === 'DATA_ENVELOPE' && msg.targetId === this.peer?.id) {
-        this.handleIncomingData(msg.payload);
-      }
+    } else if (msg.type === 'PING_RECEIVER' && this.role === 'receiver' && msg.targetId === this.myBridgeId) {
+      this.broadcast.postMessage({
+        type: 'RECEIVER_PONG',
+        targetId: msg.senderId,
+        receiverId: this.myBridgeId
+      });
+    } else if (msg.type === 'RECEIVER_PONG' && this.role === 'sender') {
+      this.emit('connected_via_bus');
+    } else if (msg.type === 'DATA_ENVELOPE') {
+      this.handleIncomingData(msg.payload);
+    } else if (msg.type === 'BINARY_ENVELOPE') {
+      this.handleIncomingData(msg.buffer);
     }
   }
 
+  // Send control JSON or binary packet
   sendPayload(payload) {
     if (this.connection && this.connection.open) {
       this.connection.send(payload);
     } else if (this.broadcast) {
       this.broadcast.postMessage({
         type: 'DATA_ENVELOPE',
-        targetId: this.role === 'sender' ? this.targetBridgeId : this.senderPeerId,
         payload
+      });
+    }
+  }
+
+  // Send raw high-speed binary buffer directly
+  sendBinaryChunk(arrayBuffer) {
+    if (this.connection && this.connection.open) {
+      this.connection.send(arrayBuffer);
+    } else if (this.broadcast) {
+      this.broadcast.postMessage({
+        type: 'BINARY_ENVELOPE',
+        buffer: arrayBuffer
       });
     }
   }
 
   // --- INCOMING DATA DISPATCHER ---
   handleIncomingData(data) {
+    // 1. Binary Packet (Magic byte 0x42)
+    if (data instanceof ArrayBuffer || ArrayBuffer.isView(data) || (data && data.byteLength)) {
+      const buffer = data instanceof ArrayBuffer ? data : data.buffer;
+      const view = new DataView(buffer, data.byteOffset || 0, data.byteLength || buffer.byteLength);
+      
+      if (view.byteLength >= 13 && view.getUint8(0) === 0x42) {
+        const chunkIndex = view.getUint32(1);
+        const totalChunks = view.getUint32(5);
+        const chunkLength = view.getUint32(9);
+        const rawSlice = new Uint8Array(buffer, (data.byteOffset || 0) + 13, chunkLength);
+        
+        this.handleReceivedBinaryChunk(chunkIndex, totalChunks, rawSlice);
+        return;
+      }
+    }
+
+    // 2. Control Messages (JSON object)
     if (typeof data === 'string') {
       try {
         data = JSON.parse(data);
       } catch {
-        // raw string
+        return;
       }
     }
 
+    if (!data || typeof data !== 'object') return;
+
     if (data.type === 'HANDSHAKE_REQUEST') {
-      // Receiver prompts user for approval
       this.emit('handshake_requested', {
         senderName: data.senderName,
         file: data.file,
@@ -310,8 +375,6 @@ export class FileBridgeEngine {
       } else {
         this.emit('handshake_declined', data.reason);
       }
-    } else if (data.type === 'CHUNK') {
-      this.handleReceivedChunk(data);
     } else if (data.type === 'PAUSE') {
       this.isPaused = true;
       this.emit('paused_by_peer');
@@ -324,7 +387,7 @@ export class FileBridgeEngine {
   }
 
   // --- SENDER: INITIATE HANDSHAKE ---
-  requestTransfer(file, senderName = 'Android Device') {
+  requestTransfer(file, senderName = 'Sender Device') {
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     this.activeTransfer = {
       file,
@@ -351,7 +414,7 @@ export class FileBridgeEngine {
     this.emit('handshake_waiting');
   }
 
-  // --- SENDER: STREAMING CHUNKS WITH BACKPRESSURE ---
+  // --- SENDER: STREAMING CHUNKS DIRECTLY IN RAW BINARY WITH BACKPRESSURE ---
   async startStreaming() {
     if (!this.activeTransfer || !this.activeTransfer.file) return;
 
@@ -377,7 +440,7 @@ export class FileBridgeEngine {
         });
       }
 
-      // Check backpressure on RTCDataChannel
+      // Hardware Flow Control / Backpressure: if socket buffer is full, wait for it to drain
       if (dataChannel && dataChannel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
         await new Promise((resolve) => {
           const onLow = () => {
@@ -391,15 +454,19 @@ export class FileBridgeEngine {
       const start = chunkIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
       const slice = file.slice(start, end);
-      const buffer = await slice.arrayBuffer();
+      const sliceBuffer = await slice.arrayBuffer();
 
-      // Convert ArrayBuffer to base64 or send directly
-      this.sendPayload({
-        type: 'CHUNK',
-        index: chunkIndex,
-        total: totalChunks,
-        data: Array.from(new Uint8Array(buffer))
-      });
+      // Pack into 13-byte header + raw binary data (ZERO JSON overhead!)
+      // [Byte 0: 0x42 (magic), Bytes 1-4: chunkIndex, Bytes 5-8: totalChunks, Bytes 9-12: length, Bytes 13+: raw bytes]
+      const packet = new Uint8Array(13 + sliceBuffer.byteLength);
+      packet[0] = 0x42;
+      const view = new DataView(packet.buffer);
+      view.setUint32(1, chunkIndex);
+      view.setUint32(5, totalChunks);
+      view.setUint32(9, sliceBuffer.byteLength);
+      packet.set(new Uint8Array(sliceBuffer), 13);
+
+      this.sendBinaryChunk(packet.buffer);
 
       chunkIndex++;
       this.activeTransfer.currentChunk = chunkIndex;
@@ -416,11 +483,6 @@ export class FileBridgeEngine {
         speed: this.currentSpeed,
         eta: this.calculateETA(file.size - end)
       });
-
-      // Yield slightly to prevent blocking main UI thread on high-speed transfers
-      if (chunkIndex % 8 === 0) {
-        await new Promise((r) => setTimeout(r, 0));
-      }
     }
 
     if (!this.isCancelled && chunkIndex >= totalChunks) {
@@ -433,16 +495,14 @@ export class FileBridgeEngine {
     }
   }
 
-  // --- RECEIVER: CHUNK ASSEMBLY & DOWNLOAD ---
-  handleReceivedChunk(chunkMsg) {
+  // --- RECEIVER: ASSEMBLE CHUNKS DIRECTLY FROM RAW BINARY ---
+  handleReceivedBinaryChunk(index, total, rawSlice) {
     if (!this.activeTransfer) return;
 
-    const { index, total, data } = chunkMsg;
-    const uint8 = new Uint8Array(data);
-    this.activeTransfer.chunks[index] = uint8;
+    this.activeTransfer.chunks[index] = rawSlice;
     this.activeTransfer.receivedChunks++;
-    this.activeTransfer.bytesTransferred += uint8.length;
-    this.bytesTransferredWindow += uint8.length;
+    this.activeTransfer.bytesTransferred += rawSlice.length;
+    this.bytesTransferredWindow += rawSlice.length;
 
     const progress = (this.activeTransfer.receivedChunks / total) * 100;
     this.emit('transfer_progress', {
@@ -468,21 +528,24 @@ export class FileBridgeEngine {
         duration: (Date.now() - this.activeTransfer.startTime) / 1000
       });
 
-      // Auto-trigger download
       this.triggerDownload(downloadUrl, this.activeTransfer.fileName);
     }
   }
 
   triggerDownload(url, fileName) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.warn('Auto download notice:', e);
+    }
   }
 
-  // --- CONTROLS: PAUSE / RESUME / CANCEL ---
+  // --- CONTROLS ---
   pauseTransfer() {
     this.isPaused = true;
     this.sendPayload({ type: 'PAUSE' });

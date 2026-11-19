@@ -42,6 +42,7 @@ export default function App() {
 
   // Connection & Transfer States
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingStatus, setConnectingStatus] = useState('');
   const [connectionError, setConnectionError] = useState(null);
   const [transferState, setTransferState] = useState({
     isActive: false,
@@ -93,6 +94,14 @@ export default function App() {
         }
         return [...prev, peer];
       });
+    });
+
+    engine.on('connection_status', (status) => {
+      setConnectingStatus(status);
+    });
+
+    engine.on('handshake_waiting', () => {
+      setConnectingStatus('Waiting for receiver approval...');
     });
 
     engine.on('handshake_requested', (req) => {
@@ -482,6 +491,7 @@ export default function App() {
               initialTargetId={initialSendToId}
               discoveredPeers={discoveredPeers}
               onScanNearby={() => engineRef.current?.scanNearbyPeers()}
+              connectingStatus={connectingStatus}
             />
           </div>
         ) : activeTab === 'receive' ? (
