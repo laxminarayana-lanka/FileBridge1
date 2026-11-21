@@ -71,10 +71,14 @@ export default function App() {
   // Check URL query parameters for auto-send connect (e.g. ?sendTo=FB-XXXX or ?connect=FB-XXXX)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const targetCode = params.get('sendTo') || params.get('connect');
-    if (targetCode) {
-      setInitialSendToId(targetCode.toUpperCase());
+    const sendToCode = params.get('sendTo');
+    const senderCode = params.get('connect');
+    if (sendToCode) {
+      setInitialSendToId(sendToCode.toUpperCase());
       setActiveTab('send');
+    } else if (senderCode) {
+      setInitialSendToId(senderCode.toUpperCase());
+      setActiveTab('receive');
     }
 
     // Request notification permission early so user gets alert on completion
@@ -570,6 +574,8 @@ export default function App() {
               discoveredPeers={discoveredPeers}
               onScanNearby={() => engineRef.current?.scanNearbyPeers()}
               connectingStatus={connectingStatus}
+              bridgeId={myBridgeId}
+              onRegenerateId={handleRegenerateId}
             />
           </div>
         ) : activeTab === 'receive' ? (
@@ -583,82 +589,84 @@ export default function App() {
               <span>Back to Nearby Share</span>
             </button>
             <ReceiverView
-              bridgeId={myBridgeId}
-              onRegenerateId={handleRegenerateId}
               pendingHandshake={pendingHandshake}
               onApproveHandshake={handleApproveHandshake}
               onDeclineHandshake={handleDeclineHandshake}
+              initialSenderId={initialSendToId}
             />
           </div>
         ) : (
-          /* Default Nearby Share Home View matching the screenshot */
+          /* Default Nearby Share Home View matching the Google Files screenshot */
           <div className="flex flex-col items-center">
             
-            {/* Mascot Cute Blob Characters Illustration */}
-            <div className="w-full flex justify-center pt-2 pb-2">
-              <NearbyShareIllustration className="w-68 h-40 sm:w-76 sm:h-44" />
+            {/* Mascot Blob Illustration — larger, centered */}
+            <div className="w-full flex justify-center pt-4 pb-0">
+              <NearbyShareIllustration className="w-72 h-48 sm:w-80 sm:h-52" />
             </div>
 
-            {/* Title */}
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#1f2937] text-center mt-1">
+            {/* Title — bold, matching Google Files style */}
+            <h1 className="text-[26px] sm:text-[30px] font-bold tracking-tight text-[#1a1a2e] text-center mt-3 leading-tight">
               Nearby Share
             </h1>
 
-            {/* Send & Receive Action Buttons side-by-side (Identical to screenshot!) */}
-            <div className="flex items-center justify-center space-x-3 sm:space-x-4 mt-5 w-full max-w-xs">
+            {/* Send & Receive Buttons — wide pill, equal size, teal fill */}
+            <div className="flex items-center justify-center gap-3 mt-6 w-full max-w-[300px]">
               <button
                 onClick={() => setActiveTab('send')}
-                className="flex-1 py-2.5 px-5 rounded-full bg-[#004d61] hover:bg-[#003947] text-white font-semibold text-sm flex items-center justify-center space-x-2 shadow-xs transition-all active:scale-95"
+                className="flex-1 py-3 px-6 rounded-full bg-[#004d61] hover:bg-[#003a4a] active:bg-[#002e3b] text-white font-semibold text-[15px] flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95"
               >
-                <ArrowUp className="h-4 w-4 stroke-[2.5]" />
+                <ArrowUp className="h-[18px] w-[18px] stroke-[2.5]" />
                 <span>Send</span>
               </button>
 
               <button
                 onClick={() => setActiveTab('receive')}
-                className="flex-1 py-2.5 px-5 rounded-full bg-[#004d61] hover:bg-[#003947] text-white font-semibold text-sm flex items-center justify-center space-x-2 shadow-xs transition-all active:scale-95"
+                className="flex-1 py-3 px-6 rounded-full bg-[#004d61] hover:bg-[#003a4a] active:bg-[#002e3b] text-white font-semibold text-[15px] flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95"
               >
-                <ArrowDown className="h-4 w-4 stroke-[2.5]" />
+                <ArrowDown className="h-[18px] w-[18px] stroke-[2.5]" />
                 <span>Receive</span>
               </button>
             </div>
 
-            {/* "Using Nearby Share" Pill Link underneath */}
+            {/* "Using Nearby Share" subtle badge pill */}
             <div className="mt-5">
-              <div className="inline-flex items-center space-x-1.5 px-3.5 py-1 rounded-full bg-[#e9eef6] border border-[#e2e8f0] text-xs font-medium text-[#475569]">
-                <Share2 className="h-3.5 w-3.5 text-[#004d61]" />
-                <span>Using Nearby Share</span>
+              <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white border border-[#dde3ea] shadow-sm text-xs font-medium text-[#444746]">
+                {/* Nearby Share ∞ icon in mini form */}
+                <svg viewBox="0 0 20 14" width="18" height="13" fill="none" className="shrink-0">
+                  <path d="M3 7 C4 5,6 5,7 7 C8 9,10 9,11 7 C12 5,14 5,15 7 C16 9,18 9,19 7" stroke="#1a73e8" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                </svg>
+                <span>Using <span className="text-[#1a73e8] font-semibold">Nearby Share</span></span>
               </div>
             </div>
 
-            {/* Feature Cards List (Matches Right Screenshot!) */}
-            <div className="w-full mt-7 space-y-2.5">
+            {/* Feature Info Cards — matching right-side screenshot */}
+            <div className="w-full mt-6 space-y-2.5">
               {/* Card 1: HD Original Quality */}
-              <div className="p-4 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs flex items-center space-x-3.5">
-                <div className="w-9 h-9 rounded-xl bg-[#f0f4f9] border border-[#e2e8f0] text-[#004d61] flex items-center justify-center font-bold text-xs shrink-0 font-sans">
+              <div className="p-4 rounded-2xl bg-white border border-[#e3e8ef] shadow-sm flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-[#edf2fb] border border-[#dde3ea] text-[#004d61] flex items-center justify-center font-bold text-[13px] shrink-0 tracking-wide">
                   HD
                 </div>
-                <p className="text-xs sm:text-sm text-[#334155] leading-snug font-normal">
+                <p className="text-sm text-[#444746] leading-snug">
                   Quickly share original quality photos, videos, apps, and more
                 </p>
               </div>
 
               {/* Card 2: Offline / No Mobile Data */}
-              <div className="p-4 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs flex items-center space-x-3.5">
-                <div className="w-9 h-9 rounded-xl bg-[#f0f4f9] border border-[#e2e8f0] text-[#004d61] flex items-center justify-center shrink-0">
+              <div className="p-4 rounded-2xl bg-white border border-[#e3e8ef] shadow-sm flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-[#edf2fb] border border-[#dde3ea] text-[#004d61] flex items-center justify-center shrink-0">
                   <WifiOff className="h-5 w-5" />
                 </div>
-                <p className="text-xs sm:text-sm text-[#334155] leading-snug font-normal">
+                <p className="text-sm text-[#444746] leading-snug">
                   Share even when you do not have mobile data or an internet connection
                 </p>
               </div>
 
-              {/* Card 3: Safe Handshake */}
-              <div className="p-4 rounded-2xl bg-white border border-[#e2e8f0] shadow-xs flex items-center space-x-3.5">
-                <div className="w-9 h-9 rounded-xl bg-[#f0f4f9] border border-[#e2e8f0] text-[#004d61] flex items-center justify-center shrink-0">
+              {/* Card 3: Safe / Choose who can share */}
+              <div className="p-4 rounded-2xl bg-white border border-[#e3e8ef] shadow-sm flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-[#edf2fb] border border-[#dde3ea] text-[#004d61] flex items-center justify-center shrink-0">
                   <Shield className="h-5 w-5" />
                 </div>
-                <p className="text-xs sm:text-sm text-[#334155] leading-snug font-normal">
+                <p className="text-sm text-[#444746] leading-snug">
                   Share safely and choose who can share files with you
                 </p>
               </div>

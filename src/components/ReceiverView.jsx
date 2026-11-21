@@ -1,56 +1,101 @@
 import React, { useEffect, useRef, useState } from 'react';
-import QRCode from 'qrcode';
-import { QrCode, Copy, Check, Radio, ShieldCheck, FileText, ArrowDownToLine, RefreshCw, Link2, Share2 } from 'lucide-react';
+import { Camera, Key, Check, Radio, ShieldCheck, FileText, ArrowDownToLine } from 'lucide-react';
 import { formatBytes } from '../utils';
 
 export default function ReceiverView({
-  bridgeId,
-  onRegenerateId,
   pendingHandshake,
   onApproveHandshake,
-  onDeclineHandshake
+  onDeclineHandshake,
+  onConnectToSender,
+  initialSenderId = ''
 }) {
-  const [copiedId, setCopiedId] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const qrCanvasRef = useRef(null);
+  const [connectMethod, setConnectMethod] = useState(initialSenderId ? 'manual' : 'camera');
+  const [senderId, setSenderId] = useState(initialSenderId);
+  const [isCameraActive, setIsCameraActive] = useState(!initialSenderId);
+  const [cameraError, setCameraError] = useState(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
 
-  // Generate QR Code on canvas
   useEffect(() => {
-    if (bridgeId && qrCanvasRef.current) {
-      // Direct link that pre-fills the receiver ID for the sender
-      const shareUrl = `${window.location.origin}${window.location.pathname}?sendTo=${bridgeId}`;
-
-      QRCode.toCanvas(
-        qrCanvasRef.current,
-        shareUrl,
-        {
-          width: 210,
-          margin: 1.5,
-          color: {
-            dark: '#004d61', // Deep Google Files teal
-            light: '#ffffff'
-          }
-        },
-        (error) => {
-          if (error) console.error('QR code error:', error);
-        }
-      );
+    if (initialSenderId) {
+      setSenderId(initialSenderId);
+      setConnectMethod('manual');
+      setIsCameraActive(false);
     }
-  }, [bridgeId]);
+  }, [initialSenderId]);
 
-  const handleCopyId = () => {
-    if (!bridgeId) return;
-    navigator.clipboard.writeText(bridgeId);
-    setCopiedId(true);
-    setTimeout(() => setCopiedId(false), 2000);
-  };
+  useEffect(() => {
+    if (!isCameraActive) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      return;
+    }
 
-  const handleCopyLink = () => {
-    if (!bridgeId) return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?sendTo=${bridgeId}`;
-    navigator.clipboard.writeText(shareUrl);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+    let isScanning = true;
+    let scanInterval = null;
+
+    const startCamera = async () => {
+      setCameraError(null);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        if ('BarcodeDetector' in window) {
+          const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          scanInterval = setInterval(async () => {
+            if (!isScanning || !videoRef.current || videoRef.current.readyState < 2) return;
+            try {
+              const barcodes = await detector.detect(videoRef.current);
+              if (barcodes.length > 0) handleCodeFound(barcodes[0].rawValue);
+            } catch {
+              // Ignore a frame that cannot be decoded.
+            }
+          }, 300);
+        }
+      } catch {
+        setCameraError('Camera access denied or unavailable. Enter the sender Unique ID manually.');
+      }
+    };
+
+    startCamera();
+    return () => {
+      isScanning = false;
+      if (scanInterval) clearInterval(scanInterval);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [isCameraActive]);
+
+  const handleCodeFound = (rawText) => {
+    let extractedId = '';
+    try {
+      const url = new URL(rawText);
+      extractedId = url.searchParams.get('connect') || url.searchParams.get('sendTo') || '';
+    } catch {
+      // Raw code.
+    }
+    if (!extractedId) {
+      try {
+        extractedId = JSON.parse(rawText).id || '';
+      } catch {
+        const match = rawText.match(/FB-[A-Z0-9]+/i);
+        if (match) extractedId = match[0];
+      }
+    }
+    if (extractedId) {
+      const normalizedId = extractedId.toUpperCase();
+      setSenderId(normalizedId);
+      setIsCameraActive(false);
+      setConnectMethod('manual');
+      onConnectToSender?.(normalizedId);
+    }
   };
 
   return (
@@ -114,66 +159,71 @@ export default function ReceiverView({
           </div>
           <h2 className="text-2xl font-bold text-[#1f2937] tracking-tight">Receive Files</h2>
           <p className="text-xs sm:text-sm text-[#4b5563] mt-1">
-            Sender can scan this QR code or enter your ID to connect instantly
+            Scan the sender's QR code or enter their Unique ID
           </p>
         </div>
 
-        {/* QR Code Section (Prominent for Receiver!) */}
-        <div className="flex flex-col items-center justify-center p-6 rounded-2xl bg-[#f8fafd] border border-[#e2e8f0] mb-6">
-          <div className="p-3 bg-white rounded-2xl shadow-sm border border-[#e2e8f0]">
-            <canvas ref={qrCanvasRef} className="rounded-lg" />
-          </div>
-          
-          <p className="text-xs text-[#475569] mt-3.5 flex items-center space-x-1.5 font-medium text-center">
-            <QrCode className="h-4 w-4 text-[#004d61] shrink-0" />
-            <span>Scan with phone camera or browser to connect directly</span>
-          </p>
-
-          {/* Quick Copy Link Button */}
+        <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#f0f4f9] border border-[#e2e8f0] mb-3">
           <button
-            onClick={handleCopyLink}
-            className="mt-3 inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full bg-white hover:bg-[#e9eef6] text-[#004d61] text-xs font-semibold border border-[#cbd5e1] transition-all shadow-2xs"
+            type="button"
+            onClick={() => { setConnectMethod('camera'); setIsCameraActive(true); }}
+            className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 ${
+              connectMethod === 'camera' ? 'bg-white text-[#004d61] shadow-xs' : 'text-[#64748b]'
+            }`}
           >
-            {copiedLink ? (
-              <>
-                <Check className="h-3.5 w-3.5 text-emerald-600" />
-                <span className="text-emerald-700">Link Copied!</span>
-              </>
-            ) : (
-              <>
-                <Link2 className="h-3.5 w-3.5" />
-                <span>Copy Direct Share Link</span>
-              </>
-            )}
+            <Camera className="h-3.5 w-3.5" />
+            <span>Scan QR</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setConnectMethod('manual'); setIsCameraActive(false); }}
+            className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 ${
+              connectMethod === 'manual' ? 'bg-white text-[#004d61] shadow-xs' : 'text-[#64748b]'
+            }`}
+          >
+            <Key className="h-3.5 w-3.5" />
+            <span>Unique ID</span>
           </button>
         </div>
 
-        {/* Unique Sharing ID Display */}
-        <div className="mb-6 p-4 rounded-2xl bg-[#f0f4f9] border border-[#e2e8f0] text-center">
-          <span className="text-xs font-semibold uppercase tracking-wider text-[#64748b]">Your Unique Sharing ID</span>
-          <div className="mt-2 flex items-center justify-center space-x-2 sm:space-x-3">
-            <span className="text-3xl sm:text-4xl font-extrabold tracking-widest text-[#004d61] font-mono">
-              {bridgeId || 'LOADING...'}
-            </span>
+        {connectMethod === 'camera' ? (
+          <div className="p-4 rounded-2xl bg-[#f8fafd] border border-[#e2e8f0] text-center mb-6">
+            {cameraError ? (
+              <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+                <p>{cameraError}</p>
+                <button type="button" onClick={() => { setConnectMethod('manual'); setIsCameraActive(false); }} className="mt-2 px-3 py-1 bg-white border border-rose-300 rounded-lg font-semibold">
+                  Enter ID Manually
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="relative w-full aspect-square max-w-[240px] mx-auto rounded-2xl overflow-hidden bg-black border-2 border-[#004d61]">
+                  <video ref={videoRef} playsInline muted autoPlay className="w-full h-full object-cover" />
+                </div>
+                <p className="text-xs font-semibold text-[#1f2937] mt-3">Point camera at the Sender's QR Code</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-[#f8fafd] border border-[#e2e8f0] mb-6">
+            <input
+              type="text"
+              value={senderId}
+              onChange={(e) => setSenderId(e.target.value.toUpperCase())}
+              placeholder="e.g. FB-8942"
+              className="w-full py-3 px-4 rounded-xl bg-white border border-[#cbd5e1] text-[#1f2937] font-mono text-center text-lg uppercase tracking-widest outline-none"
+              maxLength={10}
+            />
             <button
-              onClick={handleCopyId}
-              className="p-2.5 rounded-full bg-white hover:bg-[#d3e3fd] text-[#004d61] border border-[#cbd5e1] transition-colors shadow-xs"
-              title="Copy ID to Clipboard"
+              type="button"
+              disabled={!senderId.trim()}
+              onClick={() => onConnectToSender?.(senderId.trim())}
+              className="mt-3 w-full py-3 rounded-full bg-[#004d61] disabled:bg-[#e2e8f0] disabled:text-[#94a3b8] text-white text-sm font-bold"
             >
-              {copiedId ? <Check className="h-5 w-5 text-emerald-600" /> : <Copy className="h-5 w-5" />}
-            </button>
-            <button
-              onClick={onRegenerateId}
-              className="p-2.5 rounded-full bg-white hover:bg-[#d3e3fd] text-[#64748b] hover:text-[#1e293b] border border-[#cbd5e1] transition-colors shadow-xs"
-              title="Generate New ID"
-            >
-              <RefreshCw className="h-4 w-4" />
+              Connect to Sender
             </button>
           </div>
-          {copiedId && (
-            <p className="text-xs text-emerald-600 mt-1 font-semibold">Copied ID to clipboard!</p>
-          )}
-        </div>
+        )}
 
         {/* Security & Reliability Indicators */}
         <div className="grid grid-cols-2 gap-3 text-xs text-[#475569]">
