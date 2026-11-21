@@ -249,6 +249,15 @@ export class FileBridgeEngine {
     });
   }
 
+  requestConnection(senderName = 'Nearby Device') {
+    if (!this.connection || !this.connection.open) {
+      throw new Error('Cannot request a connection before the peer connection is open.');
+    }
+
+    this.sendPayload({ type: 'CONNECTION_REQUEST', senderName });
+    this.emit('connection_status', 'Waiting for sender approval...');
+  }
+
   // --- CONNECTION EVENT HANDLERS ---
   setupConnectionHandlers(conn) {
     conn.on('data', (data) => this.handleIncomingData(data));
@@ -345,7 +354,22 @@ export class FileBridgeEngine {
 
     if (!data || typeof data !== 'object') return;
 
-    if (data.type === 'HANDSHAKE_REQUEST') {
+    if (data.type === 'CONNECTION_REQUEST') {
+      this.emit('connection_requested', {
+        senderName: data.senderName || 'Nearby Device',
+        senderId: this.connection?.peer || 'Nearby Device',
+        approve: () => {
+          this.role = 'sender';
+          this.sendPayload({ type: 'CONNECTION_RESPONSE', approved: true });
+        },
+        decline: () => {
+          this.sendPayload({ type: 'CONNECTION_RESPONSE', approved: false });
+        }
+      });
+    } else if (data.type === 'CONNECTION_RESPONSE') {
+      if (data.approved) this.role = 'receiver';
+      this.emit(data.approved ? 'connection_approved' : 'connection_declined');
+    } else if (data.type === 'HANDSHAKE_REQUEST') {
       this.emit('handshake_requested', {
         senderName: data.senderName,
         file: data.file,

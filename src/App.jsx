@@ -36,6 +36,7 @@ export default function App() {
 
   const [myBridgeId, setMyBridgeId] = useState('');
   const [pendingHandshake, setPendingHandshake] = useState(null);
+  const [pendingConnectionRequest, setPendingConnectionRequest] = useState(null);
   const [discoveredPeers, setDiscoveredPeers] = useState([]);
   
   // Modals
@@ -120,6 +121,23 @@ export default function App() {
 
     engine.on('handshake_requested', (req) => {
       setPendingHandshake(req);
+    });
+
+    engine.on('connection_requested', (req) => {
+      setPendingConnectionRequest(req);
+      setBottomNav('share');
+      setActiveTab('send');
+    });
+
+    engine.on('connection_approved', () => {
+      setIsConnecting(false);
+      setConnectingStatus('Connected to sender.');
+    });
+
+    engine.on('connection_declined', () => {
+      setIsConnecting(false);
+      setConnectingStatus('');
+      setConnectionError('The sender declined the connection request.');
     });
 
     engine.on('handshake_approved', () => {
@@ -270,6 +288,41 @@ export default function App() {
         'Could not establish connection with sharing code: ' + targetId + '. Please check the code or verify both devices are online.'
       );
     }
+  };
+
+  const handleConnectToSender = async (senderId) => {
+    setIsConnecting(true);
+    setConnectionError(null);
+    setConnectingStatus('Connecting to sender...');
+
+    try {
+      const engine = engineRef.current;
+      if (!engine) throw new Error('The transfer engine is not ready yet.');
+      await engine.connectToReceiver(senderId, engine.getDeviceName());
+      engine.requestConnection(engine.getDeviceName());
+    } catch (err) {
+      setIsConnecting(false);
+      setConnectingStatus('');
+      setConnectionError(err.message || 'Could not connect to that sender. Check the Unique ID and try again.');
+    }
+  };
+
+  const handleApproveConnectionRequest = (file) => {
+    if (!pendingConnectionRequest || !file) return;
+
+    try {
+      pendingConnectionRequest.approve();
+      setPendingConnectionRequest(null);
+      engineRef.current.requestTransfer(file, 'Nearby Device');
+    } catch (err) {
+      setPendingConnectionRequest(null);
+      setConnectionError(err.message || 'Could not start the file transfer.');
+    }
+  };
+
+  const handleDeclineConnectionRequest = () => {
+    pendingConnectionRequest?.decline();
+    setPendingConnectionRequest(null);
   };
 
   // Transfer Controls
@@ -576,6 +629,9 @@ export default function App() {
               connectingStatus={connectingStatus}
               bridgeId={myBridgeId}
               onRegenerateId={handleRegenerateId}
+              pendingConnectionRequest={pendingConnectionRequest}
+              onApproveConnectionRequest={handleApproveConnectionRequest}
+              onDeclineConnectionRequest={handleDeclineConnectionRequest}
             />
           </div>
         ) : activeTab === 'receive' ? (
@@ -593,6 +649,11 @@ export default function App() {
               onApproveHandshake={handleApproveHandshake}
               onDeclineHandshake={handleDeclineHandshake}
               initialSenderId={initialSendToId}
+              onConnectToSender={handleConnectToSender}
+              isConnecting={isConnecting}
+              connectingStatus={connectingStatus}
+              connectionError={connectionError}
+              onResetError={() => setConnectionError(null)}
             />
           </div>
         ) : (

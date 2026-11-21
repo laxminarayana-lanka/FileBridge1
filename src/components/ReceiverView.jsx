@@ -7,7 +7,11 @@ export default function ReceiverView({
   onApproveHandshake,
   onDeclineHandshake,
   onConnectToSender,
-  initialSenderId = ''
+  initialSenderId = '',
+  isConnecting = false,
+  connectingStatus = '',
+  connectionError,
+  onResetError
 }) {
   const [connectMethod, setConnectMethod] = useState(initialSenderId ? 'manual' : 'camera');
   const [senderId, setSenderId] = useState(initialSenderId);
@@ -201,6 +205,16 @@ export default function ReceiverView({
                   <video ref={videoRef} playsInline muted autoPlay className="w-full h-full object-cover" />
                 </div>
                 <p className="text-xs font-semibold text-[#1f2937] mt-3">Point camera at the Sender's QR Code</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const qrData = prompt('Paste the sender QR code URL or Unique ID:');
+                    if (qrData) handleCodeFound(qrData);
+                  }}
+                  className="mt-3 text-xs font-semibold text-[#004d61] hover:underline"
+                >
+                  Paste QR code or ID
+                </button>
               </div>
             )}
           </div>
@@ -216,13 +230,23 @@ export default function ReceiverView({
             />
             <button
               type="button"
-              disabled={!senderId.trim()}
-              onClick={() => onConnectToSender?.(senderId.trim())}
+              disabled={!senderId.trim() || isConnecting}
+              onClick={() => onConnectToSender(senderId.trim())}
               className="mt-3 w-full py-3 rounded-full bg-[#004d61] disabled:bg-[#e2e8f0] disabled:text-[#94a3b8] text-white text-sm font-bold"
             >
-              Connect to Sender
+              {isConnecting ? connectingStatus || 'Connecting...' : 'Connect to Sender'}
             </button>
           </div>
+        )}
+
+        {connectionError && (
+          <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between">
+            <span>{connectionError}</span>
+            <button type="button" onClick={onResetError} className="ml-3 font-semibold">Dismiss</button>
+          </div>
+        )}
+        {connectingStatus && !connectionError && !isConnecting && (
+          <p role="status" className="mb-4 text-center text-xs font-semibold text-emerald-700">{connectingStatus}</p>
         )}
 
         {/* Security & Reliability Indicators */}

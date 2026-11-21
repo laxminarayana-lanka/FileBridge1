@@ -29,7 +29,10 @@ export default function SenderView({
   onScanNearby,
   connectingStatus = '',
   bridgeId,
-  onRegenerateId
+  onRegenerateId,
+  pendingConnectionRequest,
+  onApproveConnectionRequest,
+  onDeclineConnectionRequest
 }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [targetId, setTargetId] = useState(initialTargetId);
@@ -113,6 +116,51 @@ export default function SenderView({
   };
 
   return (
+    <>
+    {pendingConnectionRequest && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-3xl bg-white border border-[#e2e8f0] p-6 shadow-2xl">
+          <div className="flex items-center space-x-3 mb-4">
+            <div className="h-10 w-10 rounded-2xl bg-[#c2e7ff] text-[#004d61] flex items-center justify-center">
+              <Radio className="h-5 w-5 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-[#1f2937]">Incoming Connection Request</h3>
+              <p className="text-xs text-[#64748b]">{pendingConnectionRequest.senderName} wants to receive a file</p>
+            </div>
+          </div>
+          {!selectedFile && (
+            <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+              <p>Choose a file to send before accepting this request.</p>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-2 px-3 py-1.5 rounded-full bg-white border border-amber-300 font-semibold"
+              >
+                Choose File
+              </button>
+            </div>
+          )}
+          <div className="flex items-center space-x-3">
+            <button
+              type="button"
+              onClick={onDeclineConnectionRequest}
+              className="flex-1 py-3 px-4 rounded-full bg-[#f1f5f9] text-[#475569] text-sm font-semibold"
+            >
+              Decline
+            </button>
+            <button
+              type="button"
+              disabled={!selectedFile}
+              onClick={() => onApproveConnectionRequest(selectedFile)}
+              className="flex-1 py-3 px-4 rounded-full bg-[#004d61] disabled:bg-[#e2e8f0] disabled:text-[#94a3b8] text-white text-sm font-semibold"
+            >
+              Accept & Send
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="bg-white rounded-3xl p-6 sm:p-8 border border-[#e2e8f0] shadow-sm max-w-lg mx-auto">
       {/* Header */}
       <div className="text-center mb-6">
@@ -366,5 +414,6 @@ export default function SenderView({
       </div>
 
     </div>
+    </>
   );
 }
