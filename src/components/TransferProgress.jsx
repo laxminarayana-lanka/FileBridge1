@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Pause,
@@ -9,7 +9,6 @@ import {
   Activity,
   Timer,
   HardDrive,
-  Radio,
   FileText,
   ShieldCheck,
   RotateCcw,
@@ -17,6 +16,8 @@ import {
   Zap
 } from 'lucide-react';
 import { formatBytes, formatSpeed, formatTimeRemaining } from '../utils';
+
+const TransferJourney = lazy(() => import('./TransferJourney'));
 
 export default function TransferProgress({
   transferState,
@@ -36,9 +37,7 @@ export default function TransferProgress({
     isCompleted = false,
     downloadUrl = null,
     role = 'sender',
-    duration = 0,
-    currentChunk = 0,
-    totalChunks = 100
+    duration = 0
   } = transferState;
 
   // Trigger celebration confetti on 100% completion
@@ -55,10 +54,6 @@ export default function TransferProgress({
       }
     }
   }, [isCompleted]);
-
-  // Generate visual chunk blocks
-  const blockCount = 48;
-  const completedBlocks = Math.floor((progress / 100) * blockCount);
 
   return (
     <div className="bg-white rounded-3xl p-6 sm:p-8 border border-[#e2e8f0] max-w-xl mx-auto shadow-sm relative overflow-hidden">
@@ -190,30 +185,13 @@ export default function TransferProgress({
         </div>
       </div>
 
-      {/* Visual Chunk Grid */}
-      <div className="mb-6 p-3.5 rounded-2xl bg-[#f8fafd] border border-[#e2e8f0]">
-        <div className="flex items-center justify-between text-[11px] text-[#64748b] mb-2 font-medium">
-          <span className="flex items-center space-x-1">
-            <Radio className="h-3 w-3 text-[#004d61]" />
-            <span>Real-Time 64 KB Slices</span>
-          </span>
-          <span>Chunk {currentChunk} of {totalChunks}</span>
+      <Suspense fallback={
+        <div className="mb-6 flex h-52 items-center justify-center rounded-2xl border border-[#dbeaf6] bg-[#e3f2ff] text-sm font-medium text-[#145b91] sm:h-60">
+          Preparing delivery animation...
         </div>
-        <div className="grid grid-cols-12 gap-1">
-          {Array.from({ length: blockCount }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-2 rounded-xs transition-colors duration-150 ${
-                i < completedBlocks
-                  ? isCompleted ? 'bg-emerald-500' : 'bg-[#004d61]'
-                  : i === completedBlocks && !isCompleted && !isPaused
-                  ? 'bg-[#004d61]/40 animate-pulse'
-                  : 'bg-[#e2e8f0]'
-              }`}
-            />
-          ))}
-        </div>
-      </div>
+      }>
+        <TransferJourney progress={progress} isCompleted={isCompleted} isPaused={isPaused} />
+      </Suspense>
 
       {/* Action Controls */}
       <div className="flex items-center space-x-3">
